@@ -11,9 +11,23 @@ const productSchema = new schema(
       type: Number,
       required: true,
     },
-    description: String,
-    image: String,
-    category: String,
+    description: {
+      type: String,
+      required: true,
+    },
+    image: {
+      type: String,
+      required: true,
+    },
+    category: {
+      type: schema.Types.ObjectId,
+      ref: "category",
+      required: true,
+    },
+    rating: {
+      type: Number,
+      required: true,
+    },
   },
   {
     timestamps: true,

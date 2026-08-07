@@ -1,11 +1,17 @@
 const Product = require("../model/product");
+const Category = require("../model/category");
+const findOrCreateCategory = require("../helpers/findOrCreateCategory");
+const generateRating = require("../helpers/generateRating");
 
 const getAllProducts = async (req, res) => {
   try {
     const limit = Number(req.query.limit) || 0;
     const sort = req.query.sort === "desc" ? -1 : 1;
 
-    const products = await Product.find().limit(limit).sort({ _id: sort });
+    const products = await Product.find()
+      .populate("category", "name")
+      .limit(limit)
+      .sort({ _id: sort });
 
     res.json(products);
   } catch (error) {
@@ -19,11 +25,11 @@ const getProductById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const product = await Product.findById(id);
+    const product = await Product.findById(id).populate("category", "name");
 
     if (!product) {
       return res.status(404).json({
-        message: "Producto no encontrado",
+        message: "Product not found",
       });
     }
 
@@ -35,50 +41,85 @@ const getProductById = async (req, res) => {
   }
 };
 
-const getProductCategories = (req, res) => {
-  Product.distinct("category")
-    .then((categories) => {
-      res.json(categories);
-    })
-    .catch((err) => console.log(err));
+const getProductCategories = async (req, res) => {
+  try {
+    const categories = await Category.find().select("name").sort({ name: 1 });
+    res.json(categories.map((category) => category.name));
+  } catch (error) {
+    res.status(500).json({
+      message: error.message,
+    });
+  }
 };
 
-const getProductsInCategory = (req, res) => {
-  const category = req.params.category;
-  const limit = Number(req.query.limit) || 0;
-  const sort = req.query.sort == "desc" ? -1 : 1;
+const getProductsInCategory = async (req, res) => {
+  try {
+    const categoryName = req.params.category;
+    const limit = Number(req.query.limit) || 0;
+    const sort = req.query.sort === "desc" ? -1 : 1;
 
-  Product.find({
-    category,
-  })
-    .select(["-_id"])
-    .limit(limit)
-    .sort({ id: sort })
-    .then((products) => {
-      res.json(products);
-    })
-    .catch((err) => console.log(err));
+    const category = await Category.findOne({ name: categoryName });
+
+    if (!category) {
+      return res.status(404).json({
+        success: false,
+        message: "Categoría no encontrada",
+      });
+    }
+
+    let query = Product.find({ category: category._id })
+      .populate("category", "name")
+      .sort({ _id: sort });
+
+    if (limit > 0) {
+      query = query.limit(limit);
+    }
+
+    const products = await query;
+
+    return res.json(products);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
 };
+
 const addProduct = async (req, res) => {
   try {
     const { title, price, description, image, category } = req.body;
 
-    console.log("entrooooo");
+    //TODO Validate required fields provisory
+    if (!title || !price || !category || !image || !description) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Empty data required: title, price, description, image and category",
+      });
+    }
+
+    const categoryDoc = await findOrCreateCategory(category);
 
     const product = new Product({
       title,
       price,
       description,
       image,
-      category,
+      category: categoryDoc._id,
+      rating: generateRating(), //Todo for the moment rating added manually (for the future has to be calculated)
     });
 
     const savedProduct = await product.save();
+    const populatedProduct = await Product.findById(savedProduct._id).populate(
+      "category",
+      "name",
+    );
 
     return res.status(201).json({
       success: true,
       message: "Product created successfully",
-      data: savedProduct,
+      data: populatedProduct,
     });
   } catch (error) {
     return res.status(500).json({
@@ -88,68 +129,70 @@ const addProduct = async (req, res) => {
   }
 };
 
-// const addProduct = (req, res) => {
-//   if (typeof req.body == undefined) {
-//     res.json({
-//       status: "error",
-//       message: "data is undefined",
-//     });
-//   } else {
-//     // let productCount = 0;
-//     // Product.find()
-//     //   .countDocuments(function (err, count) {
-//     //     productCount = count;
-//     //   })
-//     //   .then(() => {
-//     const product = {
-//       id: 21,
-//       title: req.body.title,
-//       price: req.body.price,
-//       description: req.body.description,
-//       image: req.body.image,
-//       category: req.body.category,
-//     };
-//     // product.save()
-//     //   .then(product => res.json(product))
-//     //   .catch(err => console.log(err))
-//     res.json(product);
-//     // });
-//   }
-// };
+const editProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, price, description, image, category } = req.body;
 
-const editProduct = (req, res) => {
-  if (typeof req.body == undefined || req.params.id == null) {
-    res.json({
-      status: "error",
-      message: "something went wrong! check your sent data",
+    const product = await Product.findById(id);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    if (title) product.title = title;
+    if (price) product.price = price;
+    if (description) product.description = description;
+    if (image) product.image = image;
+
+    if (category) {
+      const categoryDoc = await findOrCreateCategory(category);
+      product.category = categoryDoc._id;
+    }
+
+    const updatedProduct = await product.save();
+    const populatedProduct = await Product.findById(
+      updatedProduct._id,
+    ).populate("category", "name");
+
+    return res.json({
+      success: true,
+      data: populatedProduct,
     });
-  } else {
-    res.json({
-      id: parseInt(req.params.id),
-      title: req.body.title,
-      price: req.body.price,
-      description: req.body.description,
-      image: req.body.image,
-      category: req.body.category,
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
     });
   }
 };
 
-const deleteProduct = (req, res) => {
-  if (req.params.id == null) {
-    res.json({
-      status: "error",
-      message: "cart id should be provided",
+const deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const deletedProduct = await Product.findByIdAndDelete(id);
+
+    if (!deletedProduct) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Product deleted",
+      data: deletedProduct,
     });
-  } else {
-    Product.findOne({
-      id: req.params.id,
-    })
-      .select(["-_id"])
-      .then((product) => {
-        res.json(product);
-      })
-      .catch((err) => console.log(err));
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 

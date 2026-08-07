@@ -6,8 +6,10 @@ const connectDB = require("./config/database");
 
 //routes
 const productRoute = require("./routes/product");
+const categoryRoute = require("./routes/category");
 
 app.use("/products", productRoute);
+app.use("/categories", categoryRoute);
 
 connectDB();
 
